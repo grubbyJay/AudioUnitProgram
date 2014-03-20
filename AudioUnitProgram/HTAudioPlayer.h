@@ -17,6 +17,10 @@
 {
 @public
     AudioComponentInstance _audioUnit;
+    AudioFileID _audioFile;
+    SInt64 _packetCount;
+    SInt64 _packetIndex;
+    UInt32 *_audioData;
 }
 
 
@@ -34,6 +38,13 @@
  *
  *  @return 是否能够播放
  */
-- (BOOL)playWithLocationFileName:(NSString *)fileName;
+- (BOOL)playWithLocationFilePath:(NSString *)fileName;
+
+/**
+ *  获取下一个packet
+ *
+ *  @return 返回下一个Packet
+ */
+-(UInt32)getNextPacket;
 
 @end

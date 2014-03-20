@@ -15,12 +15,22 @@ OSStatus PlayCallback(void                            *inRefCon,
                       UInt32					      inNumberFrames,
                       AudioBufferList                 *ioData){
     printf("play::%ld,",inNumberFrames);
+    printf("play::%p,",ioData);
+    printf("play::%ld,",ioData->mNumberBuffers);
+    printf("inBusNumber::%ld,",inBusNumber);
     HTAudioPlayer* this = (HTAudioPlayer *)CFBridgingRelease(inRefCon);
     
-//    UInt32 *frameBuffer = ioData->mBuffers[0].mData;
-//    for (int j = 0; j < inNumberFrames; j++){
-////        frameBuffer[j] = j;//Stereo channels
-//    }
+    for (int i=0; i < ioData->mNumberBuffers; i++)
+    {
+        AudioBuffer buffer = ioData->mBuffers[i];
+        UInt32 *frameBuffer = buffer.mData;
+        for (int index = 0; index < inNumberFrames; index++)
+        {
+            frameBuffer[index] = [this getNextPacket];
+        }
+    }
+    
+    /*
     UInt32 sizeIn = sizeof(AudioStreamBasicDescription);
     AudioStreamBasicDescription audioFormatIn;
     AudioUnitGetProperty(this -> _audioUnit,
@@ -37,8 +47,7 @@ OSStatus PlayCallback(void                            *inRefCon,
                          0,
                          &audioFormatOut,
                          &sizeOut);
-
-    
+     */
     
     return noErr;
 }
@@ -68,6 +77,11 @@ static void AudioFileStreamPacketsProc(void* clientData, UInt32 numberBytes, UIn
 
 #pragma mark ======== Init API ========
 
+- (void) dealloc
+{
+	AudioUnitUninitialize(_audioUnit);
+}
+
 - (instancetype)init
 {
     self = [super init];
@@ -92,6 +106,7 @@ static void AudioFileStreamPacketsProc(void* clientData, UInt32 numberBytes, UIn
         
         AudioComponentInstanceNew(inputComponent, &_audioUnit);
         
+        /*
         UInt32 enable = 1;
         AudioUnitSetProperty(_audioUnit,
                              kAudioOutputUnitProperty_EnableIO,
@@ -99,7 +114,8 @@ static void AudioFileStreamPacketsProc(void* clientData, UInt32 numberBytes, UIn
                              0,
                              &enable,
                              sizeof(enable));
-        /*
+        */
+        
         AudioStreamBasicDescription audioFormat;
         
         audioFormat.mSampleRate         = 44100.00;
@@ -119,7 +135,7 @@ static void AudioFileStreamPacketsProc(void* clientData, UInt32 numberBytes, UIn
                              0,
                              &audioFormat,
                              sizeof(AudioStreamBasicDescription));
-        */
+        
         //Add a callback for playing
         AURenderCallbackStruct playStruct;
         playStruct.inputProc= PlayCallback;
@@ -151,12 +167,47 @@ static void AudioFileStreamPacketsProc(void* clientData, UInt32 numberBytes, UIn
 
 #pragma mark ======== Play API ========
 
-- (BOOL)playWithLocationFileName:(NSString *)fileName
+- (BOOL)playWithLocationFilePath:(NSString *)filePath
 {
+    const UInt8 *buffer = (const UInt8 *)[filePath cStringUsingEncoding:[NSString defaultCStringEncoding]];
+    CFIndex bufLen = strlen([filePath cStringUsingEncoding:[NSString defaultCStringEncoding]]);
+    CFURLRef audioFileUrl = CFURLCreateFromFileSystemRepresentation(NULL, buffer, bufLen, false);
+    
+    OSStatus result = AudioFileOpenURL(audioFileUrl, 0x01, 0, &_audioFile);
+    
+    UInt32 dataSize = sizeof(_packetCount);
+    result = AudioFileGetProperty(_audioFile, kAudioFilePropertyAudioDataPacketCount, &dataSize, &_packetCount);
+    if (result != noErr)
+    {
+        _packetCount = -1;
+    }
+    if (_packetCount > 0)
+    {
+        UInt32 packetRead = (UInt32)_packetCount;
+        _audioData=(UInt32 *)malloc(sizeof(UInt32)*packetRead);
+        
+        UInt32 numBytesRead=-1;
+        result = AudioFileReadPackets(_audioFile, false, &numBytesRead, NULL, 0, &packetRead, _audioData);
+
+    }
     //...
     AudioOutputUnitStart(_audioUnit);
 
     return YES;
+}
+
+#pragma mark ======== 获取下一个packet API ========
+
+-(UInt32)getNextPacket
+{
+    UInt32 returnValue = 0;
+    if (_packetIndex >= _packetCount)
+    {
+        _packetIndex = 0;
+    }
+    returnValue = _audioData[_packetIndex++];
+    
+    return returnValue;
 }
 
 @end
