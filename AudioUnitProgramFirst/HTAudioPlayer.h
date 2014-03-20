@@ -11,7 +11,7 @@
 #import <AVFoundation/AVFoundation.h>
 
 /**
- *  利用Audio Unit 和 Audio File来播放
+ *  利用Audio Unit 和 Audio File Stream来播放
  */
 @interface HTAudioPlayer : NSObject
 {
