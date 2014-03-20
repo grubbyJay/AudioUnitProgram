@@ -16,11 +16,30 @@
 @interface HTAudioPlayer : NSObject
 {
 @public
+    /**
+     *  Audio unit 实例
+     */
     AudioComponentInstance _audioUnit;
-    AudioFileID _audioFile;
-    SInt64 _packetCount;
-    SInt64 _packetIndex;
-    UInt32 *_audioData;
+    
+    /**
+     *  读文件流
+     */
+    CFReadStreamRef _readStreamRef;
+
+    /**
+     *  文件读入的buffer
+     */
+    UInt8* _readBuffer;
+    
+    /**
+     * readBuffer的大小
+     */
+    int _readBufferSize;
+    
+    /**
+     *  Audio File Stream 解析文件
+     */
+    AudioFileStreamID _audioFile;
 }
 
 
@@ -34,17 +53,14 @@
 /**
  *  播放本地音频
  *
- *  @param fileName 本地音频文件名
+ *  @param filePath 本地音频文件路径
  *
- *  @return 是否能够播放
  */
-- (BOOL)playWithLocationFilePath:(NSString *)fileName;
+-(void) openWithFilePath:(NSString *)filePath;
 
 /**
- *  获取下一个packet
- *
- *  @return 返回下一个Packet
+ *  _readStreamRef读的数据可以用了
  */
--(UInt32)getNextPacket;
+- (void)dataAvailable;
 
 @end

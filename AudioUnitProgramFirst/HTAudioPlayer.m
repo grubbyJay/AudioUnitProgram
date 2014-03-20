@@ -8,65 +8,92 @@
 
 #import "HTAudioPlayer.h"
 
-OSStatus PlayCallback(void                            *inRefCon,
-                      AudioUnitRenderActionFlags      *ioActionFlags,
-                      const AudioTimeStamp            *inTimeStamp,
-                      UInt32                          inBusNumber,
-                      UInt32					      inNumberFrames,
-                      AudioBufferList                 *ioData){
+static void ReadStreamCallbackProc(
+                                   CFReadStreamRef stream,
+                                   CFStreamEventType eventType,
+                                   void* inClientInfo
+                                   )
+{
+    HTAudioPlayer *audioPlayer = (__bridge HTAudioPlayer *)inClientInfo;
+    switch (eventType)
+    {
+        case kCFStreamEventErrorOccurred:
+//            [datasource errorOccured];
+            break;
+        case kCFStreamEventEndEncountered:
+//            [datasource eof];
+            break;
+        case kCFStreamEventHasBytesAvailable:
+            [audioPlayer dataAvailable];
+            break;
+        default:
+            break;
+    }
+}
+
+static OSStatus PlayCallback(
+                             void                            *inRefCon,
+                             AudioUnitRenderActionFlags      *ioActionFlags,
+                             const AudioTimeStamp            *inTimeStamp,
+                             UInt32                          inBusNumber,
+                             UInt32					      inNumberFrames,
+                             AudioBufferList                 *ioData
+                             )
+{
     printf("play::%ld,",inNumberFrames);
     printf("play::%p,",ioData);
     printf("play::%ld,",ioData->mNumberBuffers);
     printf("inBusNumber::%ld,",inBusNumber);
-    HTAudioPlayer* this = (HTAudioPlayer *)CFBridgingRelease(inRefCon);
-    
-    for (int i=0; i < ioData->mNumberBuffers; i++)
-    {
-        AudioBuffer buffer = ioData->mBuffers[i];
-        UInt32 *frameBuffer = buffer.mData;
-        for (int index = 0; index < inNumberFrames; index++)
-        {
-            frameBuffer[index] = [this getNextPacket];
-        }
-    }
-    
-    /*
-    UInt32 sizeIn = sizeof(AudioStreamBasicDescription);
-    AudioStreamBasicDescription audioFormatIn;
-    AudioUnitGetProperty(this -> _audioUnit,
-                         kAudioUnitProperty_StreamFormat,
-                         kAudioUnitScope_Input,
-                         0,
-                         &audioFormatIn,
-                         &sizeIn);
-    UInt32 sizeOut = sizeof(AudioStreamBasicDescription);
-    AudioStreamBasicDescription audioFormatOut;
-    AudioUnitGetProperty(this -> _audioUnit,
-                         kAudioUnitProperty_StreamFormat,
-                         kAudioUnitScope_Output,
-                         0,
-                         &audioFormatOut,
-                         &sizeOut);
-     */
     
     return noErr;
 }
 
-/*
-static void AudioFileStreamPropertyListenerProc(void* clientData, AudioFileStreamID audioFileStream, AudioFileStreamPropertyID	propertyId, UInt32* flags)
+/**
+ *  文件流中的属性改变时调用的回调
+ *
+ *  @param clientData      外接传入的参数
+ *  @param audioFileStream 文件流解析器
+ *  @param propertyId      变化的属性Id
+ *  @param flags           标志位
+ *
+ *  @return void
+ */
+static void AudioFileStreamPropertyListenerProc(
+                                                void* clientData,
+                                                AudioFileStreamID audioFileStream,
+                                                AudioFileStreamPropertyID	propertyId,
+                                                UInt32* flags
+                                                )
 {
-	HTAudioPlayer* player = (HTAudioPlayer*)CFBridgingRelease(clientData);
+    HTAudioPlayer *audioPlayer = (__bridge HTAudioPlayer *)clientData;
     
 //	[player handlePropertyChangeForFileStream:audioFileStream fileStreamPropertyID:propertyId ioFlags:flags];
 }
 
-static void AudioFileStreamPacketsProc(void* clientData, UInt32 numberBytes, UInt32 numberPackets, const void* inputData, AudioStreamPacketDescription* packetDescriptions)
+/**
+ *  数据流解析成音频数据之后的回调
+ *
+ *  @param clientData         外界传入的参数
+ *  @param numberBytes        音频数据流的字节数
+ *  @param numberPackets      音频数据包的个数
+ *  @param inputData          音频数据
+ *  @param packetDescriptions 音频流的数据包的描述
+ *
+ *  @return void
+ */
+static void AudioFileStreamPacketsProc(
+                                       void* clientData,
+                                       UInt32 numberBytes,
+                                       UInt32 numberPackets,
+                                       const void* inputData,
+                                       AudioStreamPacketDescription* packetDescriptions
+                                       )
 {
-	HTAudioPlayer* player = (HTAudioPlayer*)CFBridgingRelease(clientData);
+    HTAudioPlayer *audioPlayer = (__bridge HTAudioPlayer *)clientData;
     
 //	[player handleAudioPackets:inputData numberBytes:numberBytes numberPackets:numberPackets packetDescriptions:packetDescriptions];
 }
-*/
+
 
 @interface HTAudioPlayer ()
 
@@ -106,16 +133,6 @@ static void AudioFileStreamPacketsProc(void* clientData, UInt32 numberBytes, UIn
         
         AudioComponentInstanceNew(inputComponent, &_audioUnit);
         
-        /*
-        UInt32 enable = 1;
-        AudioUnitSetProperty(_audioUnit,
-                             kAudioOutputUnitProperty_EnableIO,
-                             kAudioUnitScope_Input,
-                             0,
-                             &enable,
-                             sizeof(enable));
-        */
-        
         AudioStreamBasicDescription audioFormat;
         
         audioFormat.mSampleRate         = 44100.00;
@@ -127,7 +144,6 @@ static void AudioFileStreamPacketsProc(void* clientData, UInt32 numberBytes, UIn
         audioFormat.mBytesPerFrame      = audioFormat.mBitsPerChannel*audioFormat.mChannelsPerFrame/8;
         audioFormat.mBytesPerPacket     = audioFormat.mBytesPerFrame*audioFormat.mFramesPerPacket;
         audioFormat.mReserved           = 0;
-        
         
         AudioUnitSetProperty(_audioUnit,
                              kAudioUnitProperty_StreamFormat,
@@ -147,10 +163,14 @@ static void AudioFileStreamPacketsProc(void* clientData, UInt32 numberBytes, UIn
                              0,
                              &playStruct,
                              sizeof(playStruct));
-
         
         AudioUnitInitialize(_audioUnit);
         
+        /**
+         *  读文件的流buffer和size
+         */
+        _readBufferSize = 64 * 1024;
+        _readBuffer = calloc(sizeof(UInt8), _readBufferSize);
     }
     return self;
 }
@@ -169,45 +189,99 @@ static void AudioFileStreamPacketsProc(void* clientData, UInt32 numberBytes, UIn
 
 - (BOOL)playWithLocationFilePath:(NSString *)filePath
 {
-    const UInt8 *buffer = (const UInt8 *)[filePath cStringUsingEncoding:[NSString defaultCStringEncoding]];
-    CFIndex bufLen = strlen([filePath cStringUsingEncoding:[NSString defaultCStringEncoding]]);
-    CFURLRef audioFileUrl = CFURLCreateFromFileSystemRepresentation(NULL, buffer, bufLen, false);
-    
-    OSStatus result = AudioFileOpenURL(audioFileUrl, 0x01, 0, &_audioFile);
-    
-    UInt32 dataSize = sizeof(_packetCount);
-    result = AudioFileGetProperty(_audioFile, kAudioFilePropertyAudioDataPacketCount, &dataSize, &_packetCount);
-    if (result != noErr)
-    {
-        _packetCount = -1;
-    }
-    if (_packetCount > 0)
-    {
-        UInt32 packetRead = (UInt32)_packetCount;
-        _audioData=(UInt32 *)malloc(sizeof(UInt32)*packetRead);
-        
-        UInt32 numBytesRead=-1;
-        result = AudioFileReadPackets(_audioFile, false, &numBytesRead, NULL, 0, &packetRead, _audioData);
-
-    }
     //...
+    [self openWithFilePath:filePath];
     AudioOutputUnitStart(_audioUnit);
 
     return YES;
 }
 
-#pragma mark ======== 获取下一个packet API ========
+#pragma mark ======== CFReadStreamRef API ========
 
--(UInt32)getNextPacket
+-(void) openWithFilePath:(NSString *)filePath
 {
-    UInt32 returnValue = 0;
-    if (_packetIndex >= _packetCount)
+    if (_readStreamRef)
     {
-        _packetIndex = 0;
+        CFReadStreamSetClient(_readStreamRef, kCFStreamEventHasBytesAvailable | kCFStreamEventErrorOccurred | kCFStreamEventEndEncountered, NULL, NULL);
+        CFReadStreamUnscheduleFromRunLoop(_readStreamRef, [[NSRunLoop currentRunLoop] getCFRunLoop], kCFRunLoopCommonModes);
+
+        CFReadStreamClose(_readStreamRef);
+        CFRelease(_readStreamRef);
+        
+        _readStreamRef = 0;
     }
-    returnValue = _audioData[_packetIndex++];
     
-    return returnValue;
+    NSURL* url = [[NSURL alloc] initFileURLWithPath:filePath];
+    
+    _readStreamRef = CFReadStreamCreateWithFile(NULL, (__bridge CFURLRef)url);
+    
+    NSError* fileError;
+    
+    if (fileError)
+    {
+        CFReadStreamClose(_readStreamRef);
+        CFRelease(_readStreamRef);
+        _readStreamRef = 0;
+        return;
+    }
+    
+    if (_readStreamRef)
+    {
+        CFStreamClientContext context = {0, (__bridge void*)self, NULL, NULL, NULL};
+        CFReadStreamSetClient(_readStreamRef, kCFStreamEventHasBytesAvailable | kCFStreamEventErrorOccurred | kCFStreamEventEndEncountered, ReadStreamCallbackProc, &context);
+        CFReadStreamScheduleWithRunLoop(_readStreamRef, [[NSRunLoop currentRunLoop] getCFRunLoop], kCFRunLoopCommonModes);
+    }
+    
+    CFReadStreamOpen(_readStreamRef);
+}
+
+- (void)dataAvailable
+{
+    [self readIntoBuffer:_readBuffer withSize:_readBufferSize];
+    [self parseAudioPacketFromeBuffer:_readBuffer withSize:_readBufferSize];
+}
+
+/**
+ *  从文件流取出文件
+ *
+ *  @param buffer audio 数据
+ *  @param size   buffer的大小
+ *
+ *  @return 读文件返回的结果
+ */
+-(int) readIntoBuffer:(UInt8 *)buffer withSize:(int)size
+{
+    int retval = (int)CFReadStreamRead(_readStreamRef, buffer, size);
+    return retval;
+}
+
+#pragma mark ======== Audio File Stream Server API ========
+
+/**
+ *  将流文件的数据转化成音频数据
+ *
+ *  @param buffer 将要被转换的的数据
+ *  @param size   buffer的大小
+ */
+- (void)parseAudioPacketFromeBuffer:(UInt8 *)buffer withSize:(int)size
+{
+    OSStatus error;
+    if (!_audioFile)
+    {
+        error = AudioFileStreamOpen(
+                                    (__bridge void*)self,
+                                    AudioFileStreamPropertyListenerProc,
+                                    AudioFileStreamPacketsProc,
+                                    kAudioFileWAVEType,
+                                    &_audioFile
+                                    );
+    }
+    error = AudioFileStreamParseBytes(
+                                      _audioFile,
+                                      size,
+                                      buffer,
+                                      kAudioFileStreamParseFlag_Discontinuity
+                                      );
 }
 
 @end
